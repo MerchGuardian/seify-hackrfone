@@ -45,10 +45,7 @@
 mod types;
 pub use types::*;
 
-use std::{
-    os::fd::{AsRawFd, OwnedFd},
-    sync::atomic::Ordering,
-};
+use std::sync::atomic::Ordering;
 
 use futures_lite::future::block_on;
 use nusb::{
@@ -87,7 +84,9 @@ impl HackRf {
     /// Wraps a HackRf One exposed through an existing file descriptor.
     ///
     /// Useful on platforms like Android where [`UsbManager`](https://developer.android.com/reference/android/hardware/usb/UsbManager#openAccessory(android.hardware.usb.UsbAccessory)) permits access to an fd.
-    pub fn from_fd(fd: OwnedFd) -> Result<Self> {
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    pub fn from_fd(fd: std::os::fd::OwnedFd) -> Result<Self> {
+        use std::os::fd::AsRawFd;
         log::info!("Wrapping hackrf fd={}", fd.as_raw_fd());
         let device = nusb::Device::from_fd(fd)?;
 
