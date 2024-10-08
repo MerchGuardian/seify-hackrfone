@@ -66,6 +66,5 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
       - name: cargo build
-        run: cargo build
-        run: cargo build --examples
+        run: cargo build && cargo build --examples
 
