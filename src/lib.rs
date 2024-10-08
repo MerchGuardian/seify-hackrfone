@@ -45,7 +45,10 @@
 mod types;
 pub use types::*;
 
-use std::sync::atomic::Ordering;
+use std::{
+    os::fd::{AsRawFd, OwnedFd},
+    sync::atomic::Ordering,
+};
 
 use futures_lite::future::block_on;
 use nusb::{
@@ -66,23 +69,8 @@ pub struct HackRf {
 }
 
 impl HackRf {
-    /// Wraps an existing nusb::Device.
-    /// Useful on platform like Android where you are forced to use [`nusb::Device::from_fd`].
-    pub fn wrap(device: nusb::Device) -> Result<Self> {
-        let interface = device
-            .detach_and_claim_interface(0)
-            .expect("claim interface");
-
-        Ok(HackRf {
-            interface,
-            // TODO: Actually read version, dont assume latest
-            version: UsbVersion::from_bcd(0x0102),
-            mode: AtomicMode::new(Mode::Off),
-        })
-    }
-
     /// Opens `info` based on the result of a `nusb` scan.
-    fn open(info: DeviceInfo) -> Result<Self> {
+    pub fn open(info: DeviceInfo) -> Result<Self> {
         let device = info.open()?;
 
         let interface = device
@@ -92,6 +80,25 @@ impl HackRf {
         Ok(HackRf {
             interface,
             version: UsbVersion::from_bcd(info.device_version()),
+            mode: AtomicMode::new(Mode::Off),
+        })
+    }
+
+    /// Wraps a HackRf One exposed through an existing file descriptor.
+    ///
+    /// Useful on platforms like Android where [`UsbManager`](https://developer.android.com/reference/android/hardware/usb/UsbManager#openAccessory(android.hardware.usb.UsbAccessory)) permits access to an fd.
+    pub fn from_fd(fd: OwnedFd) -> Result<Self> {
+        log::info!("Wrapping hackrf fd={}", fd.as_raw_fd());
+        let device = nusb::Device::from_fd(fd)?;
+
+        let interface = device
+            .detach_and_claim_interface(0)
+            .expect("claim interface");
+
+        Ok(HackRf {
+            interface,
+            // TODO: Actually read version, dont assume latest
+            version: UsbVersion::from_bcd(0x0102),
             mode: AtomicMode::new(Mode::Off),
         })
     }
