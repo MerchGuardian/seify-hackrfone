@@ -42,13 +42,13 @@ impl HackRf {
             .detach_and_claim_interface(0)
             .expect("claim interface");
 
-        return Ok(HackRf {
+        Ok(HackRf {
             interface,
             // TODO: Actually read version, dont assume latest
             version: UsbVersion::from_bcd(0x0102),
             timeout_nanos: AtomicU64::new(Duration::from_millis(500).as_nanos() as u64),
             mode: AtomicMode::new(Mode::Off),
-        });
+        })
     }
 
     /// Opens `info` based on the result of a `nusb` scan.
@@ -59,12 +59,12 @@ impl HackRf {
             .detach_and_claim_interface(0)
             .expect("claim interface");
 
-        return Ok(HackRf {
+        Ok(HackRf {
             interface,
             version: UsbVersion::from_bcd(info.device_version()),
             timeout_nanos: AtomicU64::new(Duration::from_millis(500).as_nanos() as u64),
             mode: AtomicMode::new(Mode::Off),
-        });
+        })
     }
 
     /// Opens the first Hackrf One found via USB.
