@@ -6,8 +6,12 @@ fn main() -> Result<()> {
 
     let radio = HackRf::open_first().context("Failed to open Hackrf")?;
 
-    println!("Board ID: {:?}", radio.board_id());
-    println!("Version: {:?}", radio.version());
-    println!("Device version: {:?}", radio.device_version());
+    println!("Board ID: {}", radio.board_id().context("Read board id")?);
+    println!(
+        "Firmware version: {}",
+        radio.version().context("Read board version")?
+    );
+    println!("Device version: {}", radio.device_version());
+
     Ok(())
 }
