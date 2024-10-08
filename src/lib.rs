@@ -252,6 +252,8 @@ impl HackRf {
 
     /// Scans the usb bus for hackrf devices, returning the pair of (bus_num, bus_addr) for each
     /// device.
+    // TODO: use macos location_id instead
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn scan() -> Result<Vec<(u8, u8)>> {
         let mut res = vec![];
         for device in nusb::list_devices()? {
@@ -263,6 +265,8 @@ impl HackRf {
     }
 
     /// Opens a hackrf with usb address `<bus_number>:<address>`
+    // TODO: use macos location_id instead
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn open_bus(bus_number: u8, address: u8) -> Result<HackRf> {
         for device in nusb::list_devices()? {
             if device.vendor_id() == HACKRF_USB_VID
@@ -301,6 +305,7 @@ impl HackRf {
                     .interface_number();
                 debug!("Using configuration {config:?} for device {info:?}");
 
+                #[cfg(any(target_os = "linux", target_os = "android"))]
                 if device
                     .is_kernel_driver_atached(interface_num)
                     .inspect_err(|e| warn!("Failed to determine if kernel driver is running on interface {interface_num}: {e:?}"))?
@@ -403,12 +408,7 @@ impl HackRf {
 
         self.apply_config(config)?;
 
-        self.write_control(
-            Request::SetTransceiverMode,
-            Mode::Transmit as u16,
-            0,
-            &[],
-        )?;
+        self.write_control(Request::SetTransceiverMode, Mode::Transmit as u16, 0, &[])?;
 
         Ok(())
     }
@@ -440,12 +440,7 @@ impl HackRf {
         self.apply_config(config)?;
 
         println!("set recv mode");
-        self.write_control(
-            Request::SetTransceiverMode,
-            Mode::Receive as u16,
-            0,
-            &[],
-        )?;
+        self.write_control(Request::SetTransceiverMode, Mode::Receive as u16, 0, &[])?;
         println!("done!");
 
         Ok(())
@@ -466,12 +461,7 @@ impl HackRf {
         // consumers to wrap our type in an Arc and be smart enough to not enable / disable tx / rx
         // from multiple threads at the same time on a single duplex radio.
 
-        self.write_control(
-            Request::SetTransceiverMode,
-            Mode::Off as u16,
-            0,
-            &[],
-        )?;
+        self.write_control(Request::SetTransceiverMode, Mode::Off as u16, 0, &[])?;
 
         if let Err(actual) = self.mode.compare_exchange(
             Mode::Transmit,
@@ -491,12 +481,7 @@ impl HackRf {
     pub fn stop_rx(&self) -> Result<()> {
         // NOTE: same as above - perform atomic exchange last
 
-        self.write_control(
-            Request::SetTransceiverMode,
-            Mode::Off as u16,
-            0,
-            &[],
-        )?;
+        self.write_control(Request::SetTransceiverMode, Mode::Off as u16, 0, &[])?;
 
         if let Err(actual) = self.mode.compare_exchange(
             Mode::Receive,

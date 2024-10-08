@@ -21,7 +21,7 @@ fn main() -> Result<()> {
             antenna_enable: false,
             frequency_hz: 915_000_000,
             sample_rate_hz: 2_000_000,
-            sample_rate_div: 0,
+            sample_rate_div: 1,
         })
         .context("Failed to start rx")?;
 
