@@ -12,7 +12,7 @@
 
 Rust [Hackrf One](https://greatscottgadgets.com/hackrf/one/) api, with zero native dependencies, powered by [nusb](https://github.com/kevinmehall/nusb)
 
-Written as part of [seify]() and [FutureSDR](), but standalone usage is also supported
+Written as part of [seify](https://github.com/FutureSDR/seify) and [FutureSDR](https://github.com/FutureSDR/FutureSDR), but standalone usage is also supported.
 
 ## Example
 ```

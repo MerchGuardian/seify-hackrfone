@@ -693,4 +693,3 @@ mod test {
         assert!(radio.stop_tx().is_err());
     }
 }
-
