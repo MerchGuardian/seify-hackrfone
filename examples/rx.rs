@@ -1,16 +1,18 @@
 use anyhow::{Context, Result};
-use num_complex::Complex32;
 use seify_hackrfone::{Config, HackRf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 fn main() -> Result<()> {
     env_logger::init();
 
     let radio = HackRf::open_first().context("Failed to open Hackrf")?;
 
-    println!("Board ID: {:?}", radio.board_id());
-    println!("Version: {:?}", radio.version());
-    println!("Device version: {:?}", radio.device_version());
+    println!("Board ID: {}", radio.board_id().context("Read board id")?);
+    println!(
+        "Firmware version: {}",
+        radio.version().context("Read board version")?
+    );
+    println!("Device version: {}", radio.device_version());
 
     radio
         .start_rx(&Config {
@@ -25,35 +27,38 @@ fn main() -> Result<()> {
         })
         .context("Failed to start rx")?;
 
-    const MTU: usize = 128 * 1024;
+    // Starts to drop samples below 8KB MTU, with 20MHz sample rate, on AMD Ryzen 9 @5.3GHz, linux 6.6
+    // Or use `start_rx_stream` so that triple buffering is used, and the kernel can continue to do
+    // IO in the background while we do our processing. Expect to need rx stream or a larger MTU as
+    // you implement processing more complicated than average power
+    const MTU: usize = 32 * 1024;
     let mut buf = vec![0u8; MTU];
-    let mut samples = vec![];
 
-    let collect_count = 100_000_000;
     let mut last_print = Instant::now();
-
-    while samples.len() < collect_count {
+    let mut bytes = 0;
+    let mut stream_power = 0;
+    loop {
         let n = radio.read(&mut buf).context("Failed to receive samples")?;
         assert_eq!(n, buf.len());
-        for iq in buf.chunks_exact(2) {
-            samples.push(Complex32::new(
-                (iq[0] as f32 - 127.0) / 128.0,
-                (iq[1] as f32 - 127.0) / 128.0,
-            ));
+        bytes += n;
+        for value in buf.iter().map(|v| *v as i8) {
+            stream_power += (value as i64 * value as i64) as u64;
         }
 
-        if last_print.elapsed().as_millis() > 500 {
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(last_print);
+        if elapsed.as_secs() >= 1 {
+            let full_scale_ratio = stream_power as f64 / (bytes * 127 * 127) as f64;
+            let db_full_scale = 10.0 * full_scale_ratio.log10() + 3.0;
+
+            let mib = bytes as f64 / 1_000_000.0 / elapsed.as_secs_f64();
             println!(
-                "  read {} samples ({:.1}%)",
-                samples.len(),
-                samples.len() as f64 / collect_count as f64 * 100.0
+                "{mib:.1}MiB / s, {:.1}M samples, average power {db_full_scale:.1}dBfs",
+                bytes as f64 / 2.0 / 1_000_000.0,
             );
-            last_print = Instant::now();
+            last_print += Duration::from_secs(1);
+            stream_power = 0;
+            bytes = 0;
         }
     }
-    println!("Collected {} samples", samples.len());
-
-    println!("First 100 {:#?} samples", &samples[..100]);
-
-    Ok(())
 }

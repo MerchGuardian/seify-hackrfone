@@ -7,13 +7,15 @@
 // TODO(tjn): re-enable
 // #![warn(missing_docs)]
 
+mod types;
+pub use types::*;
+
 use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
 use futures_lite::future::block_on;
-use log::{debug, warn};
 use nusb::{
     transfer::{ControlIn, ControlOut, ControlType, Queue, Recipient, RequestBuffer},
     DeviceInfo,
@@ -23,196 +25,6 @@ use nusb::{
 const HACKRF_USB_VID: u16 = 0x1D50;
 /// HackRF One USB product ID.
 const HACKRF_ONE_USB_PID: u16 = 0x6089;
-
-#[allow(dead_code)]
-#[repr(u8)]
-enum Request {
-    SetTransceiverMode = 1,
-    Max2837Write = 2,
-    Max2837Read = 3,
-    Si5351CWrite = 4,
-    Si5351CRead = 5,
-    SampleRateSet = 6,
-    BasebandFilterBandwidthSet = 7,
-    Rffc5071Write = 8,
-    Rffc5071Read = 9,
-    SpiflashErase = 10,
-    SpiflashWrite = 11,
-    SpiflashRead = 12,
-    BoardIdRead = 14,
-    VersionStringRead = 15,
-    SetFreq = 16,
-    AmpEnable = 17,
-    BoardPartidSerialnoRead = 18,
-    SetLnaGain = 19,
-    SetVgaGain = 20,
-    SetTxvgaGain = 21,
-    AntennaEnable = 23,
-    SetFreqExplicit = 24,
-    UsbWcidVendorReq = 25,
-    InitSweep = 26,
-    OperacakeGetBoards = 27,
-    OperacakeSetPorts = 28,
-    SetHwSyncMode = 29,
-    Reset = 30,
-    OperacakeSetRanges = 31,
-    ClkoutEnable = 32,
-    SpiflashStatus = 33,
-    SpiflashClearStatus = 34,
-    OperacakeGpioTest = 35,
-    CpldChecksum = 36,
-    UiEnable = 37,
-}
-
-#[atomic_enum::atomic_enum]
-#[derive(PartialEq)]
-#[repr(u16)]
-pub enum Mode {
-    Off = 0,
-    Receive = 1,
-    Transmit = 2,
-    // TODO: HACKRF_TRANSCEIVER_MODE_SS, TRANSCEIVER_MODE_CPLD_UPDATE, TRANSCEIVER_MODE_RX_SWEEP
-}
-
-/// Configurable parameters on the hackrf
-#[derive(Debug)]
-pub struct Config {
-    /// Baseband gain, 0-62dB in 2dB increments (rx only)
-    pub vga_db: u16,
-    /// 0 - 47 dB in 1dB increments (tx only)
-    pub txvga_db: u16,
-
-    /// Low-noise amplifier gain, in 0-40dB in 8dB increments (rx only)
-    // Pre baseband receive
-    pub lna_db: u16,
-    /// RF amplifier (on/off)
-    pub amp_enable: bool,
-
-    /// Antenna power port control
-    // Power enable on antenna
-    pub antenna_enable: bool,
-    /// Frequency in hz
-    pub frequency_hz: u64,
-    pub sample_rate_hz: u32,
-    // TODO: provide helpers for setting this up
-    pub sample_rate_div: u32,
-}
-
-impl Config {
-    pub fn tx_default() -> Self {
-        Self {
-            vga_db: 0,
-            lna_db: 0,
-            txvga_db: 40,
-            amp_enable: false,
-            antenna_enable: false,
-            frequency_hz: 908_000_000,
-            sample_rate_hz: 2_500_000,
-            sample_rate_div: 1,
-        }
-    }
-
-    pub fn rx_default() -> Self {
-        Self {
-            vga_db: 24,
-            lna_db: 0,
-            txvga_db: 0,
-            amp_enable: false,
-            antenna_enable: false,
-            frequency_hz: 908_000_000,
-            sample_rate_hz: 2_500_000,
-            sample_rate_div: 1,
-        }
-    }
-}
-
-/// HackRF One errors.
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("io")]
-    Io(#[from] std::io::Error),
-    #[error("transfer")]
-    Transfer(#[from] nusb::transfer::TransferError),
-    #[error("transfer truncated")]
-    TransferTruncated {
-        /// Actual amount of bytes transferred.
-        actual: usize,
-        /// Excepted number of bytes transferred.
-        expected: usize,
-    },
-    /// An API call is not supported by your hardware.
-    ///
-    /// Try updating the firmware on your device.
-    #[error("no api")]
-    NoApi {
-        /// Current device version.
-        device: UsbVersion,
-        /// Minimum version required.
-        min: UsbVersion,
-    },
-    #[error("{0}")]
-    Argument(&'static str),
-    #[error("Hackrf in invalid mode. Required: {required:?}, actual: {actual:?}")]
-    WrongMode { required: Mode, actual: Mode },
-    #[error("Device not found")]
-    NotFound,
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-/// A three-part version consisting of major, minor, and sub minor components.
-///
-/// The intended use case of `Version` is to extract meaning from the version fields in USB
-/// descriptors, such as `bcdUSB` and `bcdDevice` in device descriptors.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
-// Taken from rusb::Version: https://github.com/a1ien/rusb/blob/8f8c3c6bff6a494a140da4d93dd946bf1e564d66/src/fields.rs#L142-L203
-// nusb doesnt currently have this
-pub struct UsbVersion(pub u8, pub u8, pub u8);
-
-impl UsbVersion {
-    /// Extracts a version from a binary coded decimal (BCD) field. BCD fields exist in USB
-    /// descriptors as 16-bit integers encoding a version as `0xJJMN`, where `JJ` is the major
-    /// version, `M` is the minor version, and `N` is the sub minor version. For example, 2.0 is
-    /// encoded as `0x0200` and 1.1 is encoded as `0x0110`.
-    pub fn from_bcd(mut raw: u16) -> Self {
-        let sub_minor: u8 = (raw & 0x000F) as u8;
-        raw >>= 4;
-
-        let minor: u8 = (raw & 0x000F) as u8;
-        raw >>= 4;
-
-        let mut major: u8 = (raw & 0x000F) as u8;
-        raw >>= 4;
-
-        major += (10 * raw) as u8;
-
-        UsbVersion(major, minor, sub_minor)
-    }
-
-    /// Returns the major version.
-    pub fn major(self) -> u8 {
-        let UsbVersion(major, _, _) = self;
-        major
-    }
-
-    /// Returns the minor version.
-    pub fn minor(self) -> u8 {
-        let UsbVersion(_, minor, _) = self;
-        minor
-    }
-
-    /// Returns the sub minor version.
-    pub fn sub_minor(self) -> u8 {
-        let UsbVersion(_, _, sub_minor) = self;
-        sub_minor
-    }
-}
-
-impl std::fmt::Display for UsbVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}.{}", self.major(), self.minor(), self.sub_minor())
-    }
-}
 
 /// HackRF One software defined radio.
 pub struct HackRf {
@@ -226,14 +38,33 @@ impl HackRf {
     /// Wraps an existing nusb::Device.
     /// Useful on platform like Android where you are forced to use [`nusb::Device::from_fd`].
     pub fn wrap(device: nusb::Device) -> Result<Self> {
-        Self::open_inner(device, None)
+        let interface = device
+            .detach_and_claim_interface(0)
+            .expect("claim interface");
+
+        return Ok(HackRf {
+            interface,
+            // TODO: Actually read version, dont assume latest
+            version: UsbVersion::from_bcd(0x0102),
+            timeout_nanos: AtomicU64::new(Duration::from_millis(500).as_nanos() as u64),
+            mode: AtomicMode::new(Mode::Off),
+        });
     }
 
     /// Opens `info` based on the result of a `nusb` scan.
     fn open(info: DeviceInfo) -> Result<Self> {
         let device = info.open()?;
 
-        Self::open_inner(device, Some(&info))
+        let interface = device
+            .detach_and_claim_interface(0)
+            .expect("claim interface");
+
+        return Ok(HackRf {
+            interface,
+            version: UsbVersion::from_bcd(info.device_version()),
+            timeout_nanos: AtomicU64::new(Duration::from_millis(500).as_nanos() as u64),
+            mode: AtomicMode::new(Mode::Off),
+        });
     }
 
     /// Opens the first Hackrf One found via USB.
@@ -252,7 +83,7 @@ impl HackRf {
 
     /// Scans the usb bus for hackrf devices, returning the pair of (bus_num, bus_addr) for each
     /// device.
-    // TODO: use macos location_id instead
+    // TODO: add equivalent macos function that uses location_id
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn scan() -> Result<Vec<(u8, u8)>> {
         let mut res = vec![];
@@ -265,7 +96,7 @@ impl HackRf {
     }
 
     /// Opens a hackrf with usb address `<bus_number>:<address>`
-    // TODO: use macos location_id instead
+    // TODO: add equivalent macos function that uses location_id
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn open_bus(bus_number: u8, address: u8) -> Result<HackRf> {
         for device in nusb::list_devices()? {
@@ -279,64 +110,6 @@ impl HackRf {
         }
 
         Err(Error::NotFound)
-    }
-
-    fn open_inner(device: nusb::Device, info: Option<&DeviceInfo>) -> Result<HackRf> {
-        // TODO: Actually read version, dont assume latest
-        let version = match info {
-            Some(info) => UsbVersion::from_bcd(info.device_version()),
-            None => UsbVersion::from_bcd(0x0102),
-        };
-        // Need to select USB configuration
-        // See: https://github.com/greatscottgadgets/hackrf/blob/17f394331d16e11d835092bed14a5b7feb4f47e0/host/libhackrf/src/hackrf.c#L710-L716
-        const STANDARD_CONFIGURATION: u8 = 1;
-        if let Some(config) = device
-            .configurations()
-            .find(|c| c.configuration_value() == STANDARD_CONFIGURATION)
-        {
-            let num_interfaces = config.num_interfaces();
-            if num_interfaces == 0 {
-                warn!("Failed to find interfaces for config: {config:?}. Unable to detach kernel driver");
-            } else {
-                let interface_num = config
-                    .interfaces()
-                    .next()
-                    .expect("config.num_interfaces() was non-zero")
-                    .interface_number();
-                debug!("Using configuration {config:?} for device {info:?}");
-
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                if device
-                    .is_kernel_driver_atached(interface_num)
-                    .inspect_err(|e| warn!("Failed to determine if kernel driver is running on interface {interface_num}: {e:?}"))?
-                {
-                    // https://stackoverflow.com/questions/67453535/i-keep-getting-usb-core-usberror-errno-16-resource-busy-when-trying-to-read
-                    device
-                        .detach_kernel_driver(interface_num)
-                        .inspect_err(|e| warn!("Failed to detach kernel driver: {e:?}"))?;
-                }
-
-                if let Ok(active_config) = device.active_configuration().inspect_err(|e| {
-                    warn!("Failed to obtain active configuration for device: {e:?}")
-                }) {
-                    if active_config.configuration_value() != STANDARD_CONFIGURATION {
-                        device
-                            .set_configuration(config.configuration_value())
-                            .unwrap();
-                    }
-                }
-            }
-        } else {
-            warn!("Failed to find configuration value {STANDARD_CONFIGURATION} for device {info:?}. Leaving unconfigured");
-        }
-        let interface = device.claim_interface(0).expect("claim interface");
-
-        return Ok(HackRf {
-            interface,
-            version,
-            timeout_nanos: AtomicU64::new(Duration::from_millis(500).as_nanos() as u64),
-            mode: AtomicMode::new(Mode::Off),
-        });
     }
 
     /// Resets the HackRf.
@@ -372,12 +145,12 @@ impl HackRf {
     }
 
     fn apply_config(&self, config: &Config) -> Result<()> {
-        // self.set_lna_gain(config.lna_db)?;
-        // self.set_vga_gain(config.vga_db)?;
-        // self.set_txvga_gain(config.txvga_db)?;
+        self.set_lna_gain(config.lna_db)?;
+        self.set_vga_gain(config.vga_db)?;
+        self.set_txvga_gain(config.txvga_db)?;
         self.set_freq(config.frequency_hz)?;
-        // self.set_amp_enable(config.amp_enable)?;
-        // self.set_antenna_enable(config.antenna_enable)?;
+        self.set_amp_enable(config.amp_enable)?;
+        self.set_antenna_enable(config.antenna_enable)?;
         self.set_sample_rate(config.sample_rate_hz, config.sample_rate_div)?;
 
         Ok(())
@@ -436,12 +209,9 @@ impl HackRf {
             });
         }
 
-        println!("apply config");
         self.apply_config(config)?;
 
-        println!("set recv mode");
         self.write_control(Request::SetTransceiverMode, Mode::Receive as u16, 0, &[])?;
-        println!("done!");
 
         Ok(())
     }
