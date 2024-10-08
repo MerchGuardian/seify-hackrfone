@@ -9,8 +9,7 @@ atomic_enum = "0.3.0"
 futures-lite = "2.3.0"
 log = "0.4.22"
 num-complex = "0.4"
-# nusb = { git = "https://github.com/kevinmehall/nusb.git" }
-nusb = { path = "../nusb" }
+nusb = { git = "https://github.com/kevinmehall/nusb.git" }
 thiserror = "1.0.63"
 
 [dev-dependencies]

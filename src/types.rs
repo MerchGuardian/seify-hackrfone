@@ -1,5 +1,6 @@
 #[repr(u8)]
-pub enum Request {
+#[allow(dead_code)]
+pub(crate) enum Request {
     SetTransceiverMode = 1,
     Max2837Write = 2,
     Max2837Read = 3,
@@ -37,12 +38,16 @@ pub enum Request {
     UiEnable = 37,
 }
 
+/// Operating modes of the HackRF One.
 #[atomic_enum::atomic_enum]
 #[derive(PartialEq)]
 #[repr(u16)]
 pub enum Mode {
+    /// Transceiver is off.
     Off = 0,
+    /// Transceiver is in receive mode.
     Receive = 1,
+    /// Transceiver is in transmit mode.
     Transmit = 2,
     // TODO: HACKRF_TRANSCEIVER_MODE_SS, TRANSCEIVER_MODE_CPLD_UPDATE, TRANSCEIVER_MODE_RX_SWEEP
 }
@@ -66,12 +71,15 @@ pub struct Config {
     pub antenna_enable: bool,
     /// Frequency in hz
     pub frequency_hz: u64,
+    /// Sample rate in Hz.
     pub sample_rate_hz: u32,
     // TODO: provide helpers for setting this up
+    /// Sample rate divider.
     pub sample_rate_div: u32,
 }
 
 impl Config {
+    /// Returns the default configuration for transmitting.
     pub fn tx_default() -> Self {
         Self {
             vga_db: 0,
@@ -85,6 +93,7 @@ impl Config {
         }
     }
 
+    /// Returns the default configuration for receiving.
     pub fn rx_default() -> Self {
         Self {
             vga_db: 24,
@@ -102,15 +111,18 @@ impl Config {
 /// HackRF One errors.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// I/O error occurred.
     #[error("io")]
     Io(#[from] std::io::Error),
+    /// USB transfer error.
     #[error("transfer")]
     Transfer(#[from] nusb::transfer::TransferError),
+    /// Transfer truncated.
     #[error("transfer truncated")]
     TransferTruncated {
         /// Actual amount of bytes transferred.
         actual: usize,
-        /// Excepted number of bytes transferred.
+        /// Expected number of bytes transferred.
         expected: usize,
     },
     /// An API call is not supported by your hardware.
@@ -123,14 +135,23 @@ pub enum Error {
         /// Minimum version required.
         min: UsbVersion,
     },
+    /// Invalid argument provided.
     #[error("{0}")]
     Argument(&'static str),
-    #[error("Hackrf in invalid mode. Required: {required:?}, actual: {actual:?}")]
-    WrongMode { required: Mode, actual: Mode },
+    /// HackRF is in an invalid mode.
+    #[error("HackRF in invalid mode. Required: {required:?}, actual: {actual:?}")]
+    WrongMode {
+        /// The mode required for this operation.
+        required: Mode,
+        /// The actual mode of the device which differs from `required`.
+        actual: Mode,
+    },
+    /// Device not found.
     #[error("Device not found")]
     NotFound,
 }
 
+/// Result type for operations that may return an `Error`.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A three-part version consisting of major, minor, and sub minor components.

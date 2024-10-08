@@ -1,19 +1,51 @@
 #![deny(unsafe_code)]
 
-//! HackRF One API.
+//! # HackRF One API
 //!
-//! To get started take a look at [`HackRf::open_first`].
+//! This crate provides a Rust interface to the [HackRF One](https://greatscottgadgets.com/hackrf/one/),
+//! a popular software-defined radio (SDR) peripheral. It allows for transmitting and receiving
+//! radio signals using the HackRF One device in pure Rust.
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use anyhow::Result;
+//! use seify_hackrfone::{Config, HackRf};
+//!
+//! fn main() -> Result<()> {
+//!     let radio = HackRf::open_first()?;
+//!
+//!     radio.start_rx(&Config {
+//!         vga_db: 0,
+//!         txvga_db: 0,
+//!         lna_db: 0,
+//!         amp_enable: false,
+//!         antenna_enable: false,
+//!         frequency_hz: 915_000_000,
+//!         sample_rate_hz: 2_000_000,
+//!         sample_rate_div: 1,
+//!     })?;
+//!
+//!     let mut buf = vec![0u8; 32 * 1024];
+//!     loop {
+//!         radio.read(&mut buf)?;
+//!         // Process samples...
+//!     }
+//! }
+//! ```
+//!
+//! ## License
+//!
+//! This crate is licensed under the MIT License.
+
 #![cfg_attr(docsrs, feature(doc_cfg), feature(doc_auto_cfg))]
 // TODO(tjn): re-enable
-// #![warn(missing_docs)]
+#![warn(missing_docs)]
 
 mod types;
 pub use types::*;
 
-use std::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
+use std::sync::atomic::Ordering;
 
 use futures_lite::future::block_on;
 use nusb::{
@@ -31,7 +63,6 @@ pub struct HackRf {
     interface: nusb::Interface,
     version: UsbVersion,
     mode: AtomicMode,
-    timeout_nanos: AtomicU64,
 }
 
 impl HackRf {
@@ -46,7 +77,6 @@ impl HackRf {
             interface,
             // TODO: Actually read version, dont assume latest
             version: UsbVersion::from_bcd(0x0102),
-            timeout_nanos: AtomicU64::new(Duration::from_millis(500).as_nanos() as u64),
             mode: AtomicMode::new(Mode::Off),
         })
     }
@@ -62,7 +92,6 @@ impl HackRf {
         Ok(HackRf {
             interface,
             version: UsbVersion::from_bcd(info.device_version()),
-            timeout_nanos: AtomicU64::new(Duration::from_millis(500).as_nanos() as u64),
             mode: AtomicMode::new(Mode::Off),
         })
     }
@@ -120,10 +149,12 @@ impl HackRf {
         Ok(())
     }
 
+    /// Returns the USB version of the device.
     pub fn device_version(&self) -> UsbVersion {
         self.version
     }
 
+    /// Reads the board ID of the HackRF One device.
     pub fn board_id(&self) -> Result<u8> {
         let data: [u8; 1] = self.read_control(Request::BoardIdRead, 0, 0)?;
         Ok(data[0])
@@ -159,7 +190,7 @@ impl HackRf {
     /// Transitions the radio into transmit mode.
     /// Call this function before calling [`Self::write`].
     ///
-    /// Previous state set via `set_xxx` functions will be overriden with the parameters set in `config`.
+    /// Previous state set via `set_xxx` functions will be overridden with the parameters set in `config`.
     ///
     /// # Errors
     /// This function will return an error if a tx or rx operation is already in progress or if an
@@ -189,7 +220,7 @@ impl HackRf {
     /// Transitions the radio into receive mode.
     /// Call this function before calling [`Self::read`].
     ///
-    /// Previous state set via `set_xxx` functions will be overriden with the parameters set in `config`.
+    /// Previous state set via `set_xxx` functions will be overridden with the parameters set in `config`.
     ///
     /// # Errors
     /// This function will return an error if a tx or rx operation is already in progress or if an
@@ -216,6 +247,11 @@ impl HackRf {
         Ok(())
     }
 
+    /// Stops the transmit operation and transitions the radio into off mode.
+    ///
+    /// # Errors
+    /// This function will return an error if the device is not in transmit mode or if an
+    /// I/O error occurs.
     pub fn stop_tx(&self) -> Result<()> {
         // NOTE:  perform atomic exchange last so that we prevent other threads from racing to
         // start tx/rx with the delivery of our TransceiverMode::Off request
@@ -248,6 +284,11 @@ impl HackRf {
         Ok(())
     }
 
+    /// Stops the receive operation and transitions the radio into off mode.
+    ///
+    /// # Errors
+    /// This function will return an error if the device is not in receive mode or if an
+    /// I/O error occurs.
     pub fn stop_rx(&self) -> Result<()> {
         // NOTE: same as above - perform atomic exchange last
 
@@ -326,6 +367,9 @@ impl HackRf {
     }
 }
 
+/// Represents an asynchronous receive stream from the HackRF device.
+///
+/// Use this to read samples from the device in a streaming fashion.
 pub struct RxStream {
     queue: Queue<RequestBuffer>,
     in_flight_transfers: usize,
@@ -375,10 +419,6 @@ impl HackRf {
             });
         }
         Ok(())
-    }
-
-    pub fn timeout(&self) -> Duration {
-        Duration::from_nanos(self.timeout_nanos.load(Ordering::Acquire))
     }
 
     fn read_control<const N: usize>(
@@ -653,3 +693,4 @@ mod test {
         assert!(radio.stop_tx().is_err());
     }
 }
+
