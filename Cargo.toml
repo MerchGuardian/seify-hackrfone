@@ -3,6 +3,13 @@ name = "seify-hackrfone"
 version = "0.1.0"
 edition = "2021"
 authors = ["Troy Neubauer <troy@foxhunter.ai>"]
+repository = "https://github.com/MerchGuardian/seify-hackrfone"
+readme = "README.md"
+documentation = "https://docs.rs/seify-hackrfone/"
+description = "Fully Rust native HackRF one driver, powered by nusb"
+license = "MIT"
+keywords = ["sdr", "rf", "hackrf"]
+categories = ["api-bindings"]
 
 [dependencies]
 atomic_enum = "0.3.0"
