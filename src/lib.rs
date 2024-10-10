@@ -39,7 +39,6 @@
 //! This crate is licensed under the MIT License.
 
 #![cfg_attr(docsrs, feature(doc_cfg), feature(doc_auto_cfg))]
-// TODO(tjn): re-enable
 #![warn(missing_docs)]
 
 mod types;
@@ -81,8 +80,6 @@ impl HackRf {
         })
     }
 
-    /*
-    Uncomment after https://github.com/kevinmehall/nusb/issues/84 merges
     /// Wraps a HackRf One exposed through an existing file descriptor.
     ///
     /// Useful on platforms like Android where [`UsbManager`](https://developer.android.com/reference/android/hardware/usb/UsbManager#openAccessory(android.hardware.usb.UsbAccessory)) permits access to an fd.
@@ -103,7 +100,6 @@ impl HackRf {
             mode: AtomicMode::new(Mode::Off),
         })
     }
-    */
 
     /// Opens the first Hackrf One found via USB.
     pub fn open_first() -> Result<HackRf> {
@@ -127,7 +123,7 @@ impl HackRf {
         let mut res = vec![];
         for device in nusb::list_devices()? {
             if device.vendor_id() == HACKRF_USB_VID && device.product_id() == HACKRF_ONE_USB_PID {
-                res.push((device.bus_number(), device.device_address()));
+                res.push((device.busnum(), device.device_address()));
             }
         }
         Ok(res)
@@ -140,7 +136,7 @@ impl HackRf {
         for device in nusb::list_devices()? {
             match device.vendor_id() == HACKRF_USB_VID
                 && device.product_id() == HACKRF_ONE_USB_PID
-                && device.bus_number() == bus_number
+                && device.busnum() == bus_number
                 && device.device_address() == address
             {
                 true => return Self::open(device),
