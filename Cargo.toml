@@ -9,7 +9,9 @@ atomic_enum = "0.3.0"
 futures-lite = "2.3.0"
 log = "0.4.22"
 num-complex = "0.4"
-nusb = { git = "https://github.com/kevinmehall/nusb.git", rev = "809228038f43de2d7a636825d17439b445f612b7" }
+# TODO: waiting on https://github.com/kevinmehall/nusb/issues/84 for file descriptor wrapping support
+# nusb = { git = "https://github.com/kevinmehall/nusb.git", rev = "809228038f43de2d7a636825d17439b445f612b7" }
+nusb = "0.1.10"
 thiserror = "1.0.63"
 
 [dev-dependencies]
