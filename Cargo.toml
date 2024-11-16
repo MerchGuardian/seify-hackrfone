@@ -1,6 +1,6 @@
 [package]
 name = "seify-hackrfone"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Troy Neubauer <troy@foxhunter.ai>"]
 repository = "https://github.com/MerchGuardian/seify-hackrfone"
