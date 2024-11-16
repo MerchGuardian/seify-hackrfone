@@ -81,8 +81,6 @@ impl HackRf {
         })
     }
 
-    /*
-    Uncomment after https://github.com/kevinmehall/nusb/issues/84 merges
     /// Wraps a HackRf One exposed through an existing file descriptor.
     ///
     /// Useful on platforms like Android where [`UsbManager`](https://developer.android.com/reference/android/hardware/usb/UsbManager#openAccessory(android.hardware.usb.UsbAccessory)) permits access to an fd.
@@ -103,7 +101,6 @@ impl HackRf {
             mode: AtomicMode::new(Mode::Off),
         })
     }
-    */
 
     /// Opens the first Hackrf One found via USB.
     pub fn open_first() -> Result<HackRf> {
