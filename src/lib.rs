@@ -118,8 +118,6 @@ impl HackRf {
 
     /// Scans the usb bus for hackrf devices, returning the pair of (bus_num, bus_addr) for each
     /// device.
-    // TODO: add equivalent macos function that uses location_id
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn scan() -> Result<Vec<(u8, u8)>> {
         let mut res = vec![];
         for device in nusb::list_devices()? {
@@ -131,8 +129,6 @@ impl HackRf {
     }
 
     /// Opens a hackrf with usb address `<bus_number>:<address>`
-    // TODO: add equivalent macos function that uses location_id
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub fn open_bus(bus_number: u8, address: u8) -> Result<HackRf> {
         for device in nusb::list_devices()? {
             match device.vendor_id() == HACKRF_USB_VID
