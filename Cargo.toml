@@ -1,7 +1,7 @@
 [package]
 name = "seify-hackrfone"
-version = "0.1.1"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
 authors = ["Troy Neubauer <troy@foxhunter.ai>"]
 repository = "https://github.com/MerchGuardian/seify-hackrfone"
 readme = "README.md"
@@ -12,7 +12,6 @@ keywords = ["sdr", "rf", "hackrf"]
 categories = ["api-bindings"]
 
 [dependencies]
-atomic_enum = "0.3.0"
 futures-lite = "2.3.0"
 log = "0.4.22"
 nusb = "0.1.11"
