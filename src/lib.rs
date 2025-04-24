@@ -56,8 +56,8 @@ use std::{
 
 use futures_lite::future::block_on;
 use nusb::{
-    transfer::{ControlIn, ControlOut, ControlType, Queue, Recipient, RequestBuffer},
     DeviceInfo,
+    transfer::{ControlIn, ControlOut, ControlType, Queue, Recipient, RequestBuffer},
 };
 
 /// HackRF USB vendor ID.
