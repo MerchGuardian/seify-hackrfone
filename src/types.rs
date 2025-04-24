@@ -39,8 +39,7 @@ pub(crate) enum Request {
 }
 
 /// Operating modes of the HackRF One.
-#[atomic_enum::atomic_enum]
-#[derive(PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u16)]
 pub enum Mode {
     /// Transceiver is off.
@@ -149,6 +148,9 @@ pub enum Error {
     /// Device not found.
     #[error("Device not found")]
     NotFound,
+    /// Another streamer instance already exists.
+    #[error("Streamer instance already created")]
+    StreamerExists,
 }
 
 /// Result type for operations that may return an `Error`.

@@ -27,10 +27,14 @@
 //!     })?;
 //!
 //!     let mut buf = vec![0u8; 32 * 1024];
-//!     loop {
+//!     for _ in 0..10 {
 //!         radio.read(&mut buf)?;
 //!         // Process samples...
 //!     }
+//!     // The radio may continue transmitting/receiving if not dropped.
+//!     // Be sure to include a Control+C handler to cleanly return.
+//!     drop(radio);
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -39,13 +43,13 @@
 //! This crate is licensed under the MIT License.
 
 #![cfg_attr(docsrs, feature(doc_cfg), feature(doc_auto_cfg))]
-// TODO(tjn): re-enable
 #![warn(missing_docs)]
 
 mod types;
+use log::warn;
 pub use types::*;
 
-use std::sync::atomic::Ordering;
+use std::{collections::VecDeque, sync::Mutex};
 
 use futures_lite::future::block_on;
 use nusb::{
@@ -59,10 +63,33 @@ const HACKRF_USB_VID: u16 = 0x1D50;
 const HACKRF_ONE_USB_PID: u16 = 0x6089;
 
 /// HackRF One software defined radio.
+///
+/// NOTE: The Hackrf may continue transmitting the latest samples it received if never dropped.
+/// Be sure to include a
 pub struct HackRf {
     interface: nusb::Interface,
     version: UsbVersion,
-    mode: AtomicMode,
+    /// Synchronized state.
+    /// Hackrf is half duplex, with one antenna, so we can only do one thing at a time.
+    inner: Mutex<Inner>,
+}
+
+struct Inner {
+    mode: Mode,
+    streamer_active: bool,
+}
+
+impl Inner {
+    fn ensure_mode(&self, expected: Mode) -> Result<()> {
+        let actual = self.mode;
+        if actual != expected {
+            return Err(Error::WrongMode {
+                required: expected,
+                actual,
+            });
+        }
+        Ok(())
+    }
 }
 
 impl HackRf {
@@ -77,7 +104,10 @@ impl HackRf {
         Ok(HackRf {
             interface,
             version: UsbVersion::from_bcd(info.device_version()),
-            mode: AtomicMode::new(Mode::Off),
+            inner: Mutex::new(Inner {
+                mode: Mode::Off,
+                streamer_active: false,
+            }),
         })
     }
 
@@ -98,7 +128,10 @@ impl HackRf {
             interface,
             // TODO: Actually read version, dont assume latest
             version: UsbVersion::from_bcd(0x0102),
-            mode: AtomicMode::new(Mode::Off),
+            inner: Mutex::new(Inner {
+                mode: Mode::Off,
+                streamer_active: false,
+            }),
         })
     }
 
@@ -199,19 +232,9 @@ impl HackRf {
     /// This function will return an error if a tx or rx operation is already in progress or if an
     /// I/O error occurs
     pub fn start_tx(&self, config: &Config) -> Result<()> {
-        // NOTE: perform atomic exchange first so that we only change the transceiver mode once if
-        // other threads are racing to change with us
-        if let Err(actual) = self.mode.compare_exchange(
-            Mode::Off,
-            Mode::Transmit,
-            Ordering::AcqRel,
-            Ordering::Relaxed,
-        ) {
-            return Err(Error::WrongMode {
-                required: Mode::Off,
-                actual,
-            });
-        }
+        let mut inner = self.inner.lock().unwrap();
+        inner.ensure_mode(Mode::Off)?;
+        inner.mode = Mode::Transmit;
 
         self.apply_config(config)?;
 
@@ -229,19 +252,9 @@ impl HackRf {
     /// This function will return an error if a tx or rx operation is already in progress or if an
     /// I/O error occurs
     pub fn start_rx(&self, config: &Config) -> Result<()> {
-        // NOTE: perform atomic exchange first so that we only change the transceiver mode once if
-        // other threads are racing to change with us
-        if let Err(actual) = self.mode.compare_exchange(
-            Mode::Off,
-            Mode::Receive,
-            Ordering::AcqRel,
-            Ordering::Relaxed,
-        ) {
-            return Err(Error::WrongMode {
-                required: Mode::Off,
-                actual,
-            });
-        }
+        let mut inner = self.inner.lock().unwrap();
+        inner.ensure_mode(Mode::Off)?;
+        inner.mode = Mode::Transmit;
 
         self.apply_config(config)?;
 
@@ -250,64 +263,11 @@ impl HackRf {
         Ok(())
     }
 
-    /// Stops the transmit operation and transitions the radio into off mode.
-    ///
-    /// # Errors
-    /// This function will return an error if the device is not in transmit mode or if an
-    /// I/O error occurs.
-    pub fn stop_tx(&self) -> Result<()> {
-        // NOTE:  perform atomic exchange last so that we prevent other threads from racing to
-        // start tx/rx with the delivery of our TransceiverMode::Off request
-        //
-        // This means if multiple threads call stop_tx/stop_rx concurrently the hackrf may receive
-        // multiple TransceiverMode::Off requests, but will always end up in a valid state with the
-        // transceiver disabled.
-        //
-        // Adding something like Mode::IdlePending would solve this,
-        // however quickly this begins to look like a manually implemented mutex.
-        //
-        // To keep this crate low-level and low-overhead, this solution is fine and we expect
-        // consumers to wrap our type in an Arc and be smart enough to not enable / disable tx / rx
-        // from multiple threads at the same time on a single duplex radio.
-
+    /// Transitions the radio into off mode.
+    pub fn stop(&self) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
         self.write_control(Request::SetTransceiverMode, Mode::Off as u16, 0, &[])?;
-
-        if let Err(actual) = self.mode.compare_exchange(
-            Mode::Transmit,
-            Mode::Off,
-            Ordering::AcqRel,
-            Ordering::Relaxed,
-        ) {
-            return Err(Error::WrongMode {
-                required: Mode::Transmit,
-                actual,
-            });
-        }
-
-        Ok(())
-    }
-
-    /// Stops the receive operation and transitions the radio into off mode.
-    ///
-    /// # Errors
-    /// This function will return an error if the device is not in receive mode or if an
-    /// I/O error occurs.
-    pub fn stop_rx(&self) -> Result<()> {
-        // NOTE: same as above - perform atomic exchange last
-
-        self.write_control(Request::SetTransceiverMode, Mode::Off as u16, 0, &[])?;
-
-        if let Err(actual) = self.mode.compare_exchange(
-            Mode::Receive,
-            Mode::Off,
-            Ordering::AcqRel,
-            Ordering::Relaxed,
-        ) {
-            return Err(Error::WrongMode {
-                required: Mode::Receive,
-                actual,
-            });
-        }
+        inner.mode = Mode::Off;
 
         Ok(())
     }
@@ -317,7 +277,8 @@ impl HackRf {
     /// # Panics
     /// This function panics if samples is not a multiple of 512
     pub fn read(&self, samples: &mut [u8]) -> Result<usize> {
-        self.ensure_mode(Mode::Receive)?;
+        let inner = self.inner.lock().unwrap();
+        inner.ensure_mode(Mode::Receive)?;
 
         if samples.len() % 512 != 0 {
             panic!("samples must be a multiple of 512");
@@ -339,7 +300,8 @@ impl HackRf {
     /// # Panics
     /// This function panics if samples is not a multiple of 512
     pub fn write(&self, samples: &[u8]) -> Result<usize> {
-        self.ensure_mode(Mode::Transmit)?;
+        let inner = self.inner.lock().unwrap();
+        inner.ensure_mode(Mode::Receive)?;
 
         if samples.len() % 512 != 0 {
             panic!("samples must be a multiple of 512");
@@ -354,10 +316,20 @@ impl HackRf {
     }
 
     /// Setup the device to stream samples.
+    ///
+    /// When the stream is dropped, the device will be reset to the `Off` state,
+    /// meaning [`Self::start_rx`] will be required before using the device again.
     pub fn start_rx_stream(&self, transfer_size: usize) -> Result<RxStream> {
         if transfer_size % 512 != 0 {
             panic!("transfer_size must be a multiple of 512");
         }
+
+        let mut inner = self.inner.lock().unwrap();
+        inner.ensure_mode(Mode::Receive)?;
+        if inner.streamer_active {
+            return Err(Error::StreamerExists);
+        }
+        inner.streamer_active = true;
 
         const ENDPOINT: u8 = 0x81;
         Ok(RxStream {
@@ -366,22 +338,59 @@ impl HackRf {
             transfer_size,
             buf_pos: transfer_size,
             buf: vec![0u8; transfer_size],
+            hackrf: self,
         })
+    }
+
+    /// Setup the device to stream samples.
+    ///
+    /// When the stream is dropped, the device will be reset to the `Off` state,
+    /// meaning [`Self::start_tx`] will be required before using the device again.
+    pub fn start_tx_stream(&self) -> Result<TxStream> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.ensure_mode(Mode::Transmit)?;
+        if inner.streamer_active {
+            return Err(Error::StreamerExists);
+        }
+        inner.streamer_active = true;
+
+        const ENDPOINT: u8 = 0x02;
+        Ok(TxStream {
+            queue: self.interface.bulk_out_queue(ENDPOINT),
+            in_flight_transfers: 3,
+            expected_length: VecDeque::new(),
+            hackrf: self,
+        })
+    }
+
+    fn stop_streamer(&self) -> Result<()> {
+        if let Err(e) = self.stop() {
+            warn!("Failed to stop tx: {e:?}");
+        }
+
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.streamer_active {
+            warn!("Streamer not active");
+        }
+        inner.streamer_active = false;
+
+        Ok(())
     }
 }
 
 /// Represents an asynchronous receive stream from the HackRF device.
 ///
 /// Use this to read samples from the device in a streaming fashion.
-pub struct RxStream {
+pub struct RxStream<'a> {
     queue: Queue<RequestBuffer>,
     in_flight_transfers: usize,
     transfer_size: usize,
     buf_pos: usize,
     buf: Vec<u8>,
+    hackrf: &'a HackRf,
 }
 
-impl RxStream {
+impl RxStream<'_> {
     /// Read samples from the device, blocking until more are available.
     pub fn read_sync(&mut self, count: usize) -> Result<&[u8]> {
         let buffered_remaining = self.buf.len() - self.buf_pos;
@@ -412,18 +421,62 @@ impl RxStream {
     }
 }
 
-impl HackRf {
-    fn ensure_mode(&self, expected: Mode) -> Result<()> {
-        let actual = self.mode.load(Ordering::Acquire);
-        if actual != expected {
-            return Err(Error::WrongMode {
-                required: expected,
-                actual,
-            });
+impl Drop for RxStream<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = self.hackrf.stop_streamer() {
+            warn!("Failed to stop streamer in drop: {e:?}");
         }
+    }
+}
+
+/// Represents an asynchronous transmit stream to the HackRF device.
+///
+/// Enforces that
+pub struct TxStream<'a> {
+    queue: Queue<Vec<u8>>,
+    in_flight_transfers: usize,
+    expected_length: VecDeque<usize>,
+    hackrf: &'a HackRf,
+}
+
+impl TxStream<'_> {
+    /// Pushes some samples to the device
+    pub fn write_sync(&mut self, bytes: &[u8]) -> Result<()> {
+        let mut buf = if self.queue.pending() < self.in_flight_transfers {
+            Vec::new()
+        } else {
+            let a = block_on(self.queue.next_complete());
+            let expected = self.expected_length.pop_front().unwrap();
+            assert_eq!(a.data.actual_length(), expected, "Failed to write all bytes to device");
+            a.into_result()?.reuse()
+        };
+        buf.clear();
+        buf.extend_from_slice(bytes);
+
+        self.queue.submit(buf);
+        self.expected_length.push_back(bytes.len());
+
         Ok(())
     }
+}
 
+impl Drop for TxStream<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = self.hackrf.stop_streamer() {
+            warn!("Failed to stop streamer in drop: {e:?}");
+        }
+    }
+}
+
+impl Drop for HackRf {
+    fn drop(&mut self) {
+        if let Err(e) = self.stop() {
+            warn!("Failed to stop tx: {e:?}");
+        }
+    }
+}
+
+impl HackRf {
     fn read_control<const N: usize>(
         &self,
         request: Request,
@@ -667,11 +720,11 @@ mod test {
             .unwrap();
         std::thread::sleep(Duration::from_millis(50));
 
-        radio.stop_tx().unwrap();
-        assert!(radio.stop_tx().is_err());
-        assert!(radio.stop_tx().is_err());
-        assert!(radio.stop_rx().is_err());
-        assert!(radio.stop_rx().is_err());
+        radio.stop().unwrap();
+        assert!(radio.stop().is_err());
+        assert!(radio.stop().is_err());
+        assert!(radio.stop().is_err());
+        assert!(radio.stop().is_err());
 
         std::thread::sleep(Duration::from_millis(50));
 
@@ -689,10 +742,10 @@ mod test {
             .unwrap();
         std::thread::sleep(Duration::from_millis(50));
 
-        radio.stop_rx().unwrap();
-        assert!(radio.stop_rx().is_err());
-        assert!(radio.stop_rx().is_err());
-        assert!(radio.stop_tx().is_err());
-        assert!(radio.stop_tx().is_err());
+        radio.stop().unwrap();
+        assert!(radio.stop().is_err());
+        assert!(radio.stop().is_err());
+        assert!(radio.stop().is_err());
+        assert!(radio.stop().is_err());
     }
 }
