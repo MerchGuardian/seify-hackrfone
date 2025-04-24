@@ -49,7 +49,10 @@ mod types;
 use log::warn;
 pub use types::*;
 
-use std::{collections::VecDeque, sync::Mutex};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
 
 use futures_lite::future::block_on;
 use nusb::{
@@ -319,7 +322,7 @@ impl HackRf {
     ///
     /// When the stream is dropped, the device will be reset to the `Off` state,
     /// meaning [`Self::start_rx`] will be required before using the device again.
-    pub fn start_rx_stream(&self, transfer_size: usize) -> Result<RxStream> {
+    pub fn start_rx_stream(self: &Arc<Self>, transfer_size: usize) -> Result<RxStream> {
         if transfer_size % 512 != 0 {
             panic!("transfer_size must be a multiple of 512");
         }
@@ -338,7 +341,7 @@ impl HackRf {
             transfer_size,
             buf_pos: transfer_size,
             buf: vec![0u8; transfer_size],
-            hackrf: self,
+            hackrf: Arc::clone(&self),
         })
     }
 
@@ -346,7 +349,7 @@ impl HackRf {
     ///
     /// When the stream is dropped, the device will be reset to the `Off` state,
     /// meaning [`Self::start_tx`] will be required before using the device again.
-    pub fn start_tx_stream(&self) -> Result<TxStream> {
+    pub fn start_tx_stream(self: &Arc<Self>) -> Result<TxStream> {
         let mut inner = self.inner.lock().unwrap();
         inner.ensure_mode(Mode::Transmit)?;
         if inner.streamer_active {
@@ -359,7 +362,7 @@ impl HackRf {
             queue: self.interface.bulk_out_queue(ENDPOINT),
             in_flight_transfers: 3,
             expected_length: VecDeque::new(),
-            hackrf: self,
+            hackrf: Arc::clone(&self),
         })
     }
 
@@ -381,16 +384,16 @@ impl HackRf {
 /// Represents an asynchronous receive stream from the HackRF device.
 ///
 /// Use this to read samples from the device in a streaming fashion.
-pub struct RxStream<'a> {
+pub struct RxStream {
     queue: Queue<RequestBuffer>,
     in_flight_transfers: usize,
     transfer_size: usize,
     buf_pos: usize,
     buf: Vec<u8>,
-    hackrf: &'a HackRf,
+    hackrf: Arc<HackRf>,
 }
 
-impl RxStream<'_> {
+impl RxStream {
     /// Read samples from the device, blocking until more are available.
     pub fn read_sync(&mut self, count: usize) -> Result<&[u8]> {
         let buffered_remaining = self.buf.len() - self.buf_pos;
@@ -421,7 +424,7 @@ impl RxStream<'_> {
     }
 }
 
-impl Drop for RxStream<'_> {
+impl Drop for RxStream {
     fn drop(&mut self) {
         if let Err(e) = self.hackrf.stop_streamer() {
             warn!("Failed to stop streamer in drop: {e:?}");
@@ -432,14 +435,14 @@ impl Drop for RxStream<'_> {
 /// Represents an asynchronous transmit stream to the HackRF device.
 ///
 /// Enforces that
-pub struct TxStream<'a> {
+pub struct TxStream {
     queue: Queue<Vec<u8>>,
     in_flight_transfers: usize,
     expected_length: VecDeque<usize>,
-    hackrf: &'a HackRf,
+    hackrf: Arc<HackRf>,
 }
 
-impl TxStream<'_> {
+impl TxStream {
     /// Pushes some samples to the device
     pub fn write_sync(&mut self, bytes: &[u8]) -> Result<()> {
         let mut buf = if self.queue.pending() < self.in_flight_transfers {
@@ -447,7 +450,11 @@ impl TxStream<'_> {
         } else {
             let a = block_on(self.queue.next_complete());
             let expected = self.expected_length.pop_front().unwrap();
-            assert_eq!(a.data.actual_length(), expected, "Failed to write all bytes to device");
+            assert_eq!(
+                a.data.actual_length(),
+                expected,
+                "Failed to write all bytes to device"
+            );
             a.into_result()?.reuse()
         };
         buf.clear();
@@ -460,7 +467,7 @@ impl TxStream<'_> {
     }
 }
 
-impl Drop for TxStream<'_> {
+impl Drop for TxStream {
     fn drop(&mut self) {
         if let Err(e) = self.hackrf.stop_streamer() {
             warn!("Failed to stop streamer in drop: {e:?}");

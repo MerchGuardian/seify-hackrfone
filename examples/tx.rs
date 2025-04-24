@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use seify_hackrfone::{Config, HackRf};
 
@@ -6,7 +8,7 @@ fn main() -> Result<()> {
     builder.filter_level(log::LevelFilter::Info);
     builder.init();
 
-    let radio = HackRf::open_first().context("Failed to open Hackrf")?;
+    let radio = Arc::new(HackRf::open_first().context("Failed to open Hackrf")?);
 
     println!("Board ID: {}", radio.board_id().context("Read board id")?);
     println!(
