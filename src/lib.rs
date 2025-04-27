@@ -46,19 +46,18 @@
 #![warn(missing_docs)]
 
 mod types;
-use log::warn;
-pub use types::*;
-
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
 
 use futures_lite::future::block_on;
+use log::{info, warn};
 use nusb::{
     DeviceInfo,
     transfer::{ControlIn, ControlOut, ControlType, Queue, Recipient, RequestBuffer},
 };
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
+pub use types::*;
 
 /// HackRF USB vendor ID.
 const HACKRF_USB_VID: u16 = 0x1D50;
@@ -102,16 +101,20 @@ impl HackRf {
 
         let interface = device
             .detach_and_claim_interface(0)
-            .expect("claim interface");
+            .inspect_err(|e| warn!("detach_and_claim_interface failed: {e:?}"))?;
 
-        Ok(HackRf {
+        let this = HackRf {
             interface,
             version: UsbVersion::from_bcd(info.device_version()),
             inner: Mutex::new(Inner {
                 mode: Mode::Off,
                 streamer_active: false,
             }),
-        })
+        };
+
+        this.stop()?;
+
+        Ok(this)
     }
 
     /// Wraps a HackRf One exposed through an existing file descriptor.
@@ -120,7 +123,8 @@ impl HackRf {
     #[cfg(any(target_os = "android", target_os = "linux"))]
     pub fn from_fd(fd: std::os::fd::OwnedFd) -> Result<Self> {
         use std::os::fd::AsRawFd;
-        log::info!("Wrapping hackrf fd={}", fd.as_raw_fd());
+
+        info!("Wrapping hackrf fd={}", fd.as_raw_fd());
         let device = nusb::Device::from_fd(fd)?;
 
         let interface = device
@@ -237,11 +241,11 @@ impl HackRf {
     pub fn start_tx(&self, config: &Config) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         inner.ensure_mode(Mode::Off)?;
-        inner.mode = Mode::Transmit;
 
         self.apply_config(config)?;
 
         self.write_control(Request::SetTransceiverMode, Mode::Transmit as u16, 0, &[])?;
+        inner.mode = Mode::Transmit;
 
         Ok(())
     }
@@ -257,11 +261,11 @@ impl HackRf {
     pub fn start_rx(&self, config: &Config) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         inner.ensure_mode(Mode::Off)?;
-        inner.mode = Mode::Transmit;
 
         self.apply_config(config)?;
 
         self.write_control(Request::SetTransceiverMode, Mode::Receive as u16, 0, &[])?;
+        inner.mode = Mode::Receive;
 
         Ok(())
     }
@@ -304,7 +308,7 @@ impl HackRf {
     /// This function panics if samples is not a multiple of 512
     pub fn write(&self, samples: &[u8]) -> Result<usize> {
         let inner = self.inner.lock().unwrap();
-        inner.ensure_mode(Mode::Receive)?;
+        inner.ensure_mode(Mode::Transmit)?;
 
         if samples.len() % 512 != 0 {
             panic!("samples must be a multiple of 512");
@@ -450,11 +454,14 @@ impl TxStream {
         } else {
             let a = block_on(self.queue.next_complete());
             let expected = self.expected_length.pop_front().unwrap();
-            assert_eq!(
-                a.data.actual_length(),
-                expected,
-                "Failed to write all bytes to device"
-            );
+            let actual = a.data.actual_length();
+            if expected != actual {
+                warn!(
+                    "Failed to write all bytes to device. Expected: {expected}, wrote: {}",
+                    a.data.actual_length(),
+                );
+                return Err(Error::TransferTruncated { actual, expected });
+            }
             a.into_result()?.reuse()
         };
         buf.clear();
