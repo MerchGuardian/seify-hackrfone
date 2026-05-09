@@ -42,7 +42,7 @@
 //!
 //! This crate is licensed under the MIT License.
 
-#![cfg_attr(docsrs, feature(doc_cfg), feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
 mod types;
@@ -171,13 +171,12 @@ impl HackRf {
     /// Opens a hackrf with usb address `<bus_number>:<address>`
     pub fn open_bus(bus_number: u8, address: u8) -> Result<HackRf> {
         for device in nusb::list_devices()? {
-            match device.vendor_id() == HACKRF_USB_VID
+            if device.vendor_id() == HACKRF_USB_VID
                 && device.product_id() == HACKRF_ONE_USB_PID
                 && device.bus_number() == bus_number
                 && device.device_address() == address
             {
-                true => return Self::open(device),
-                false => (),
+                return Self::open(device);
             }
         }
 
@@ -287,7 +286,7 @@ impl HackRf {
         let inner = self.inner.lock().unwrap();
         inner.ensure_mode(Mode::Receive)?;
 
-        if samples.len() % 512 != 0 {
+        if !samples.len().is_multiple_of(512) {
             panic!("samples must be a multiple of 512");
         }
 
@@ -310,7 +309,7 @@ impl HackRf {
         let inner = self.inner.lock().unwrap();
         inner.ensure_mode(Mode::Transmit)?;
 
-        if samples.len() % 512 != 0 {
+        if !samples.len().is_multiple_of(512) {
             panic!("samples must be a multiple of 512");
         }
 
@@ -327,7 +326,7 @@ impl HackRf {
     /// When the stream is dropped, the device will be reset to the `Off` state,
     /// meaning [`Self::start_rx`] will be required before using the device again.
     pub fn start_rx_stream(self: &Arc<Self>, transfer_size: usize) -> Result<RxStream> {
-        if transfer_size % 512 != 0 {
+        if !transfer_size.is_multiple_of(512) {
             panic!("transfer_size must be a multiple of 512");
         }
 
@@ -345,7 +344,7 @@ impl HackRf {
             transfer_size,
             buf_pos: transfer_size,
             buf: vec![0u8; transfer_size],
-            hackrf: Arc::clone(&self),
+            hackrf: Arc::clone(self),
         })
     }
 
@@ -366,7 +365,7 @@ impl HackRf {
             queue: self.interface.bulk_out_queue(ENDPOINT),
             in_flight_transfers: 3,
             expected_length: VecDeque::new(),
-            hackrf: Arc::clone(&self),
+            hackrf: Arc::clone(self),
         })
     }
 

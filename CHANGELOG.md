@@ -3,6 +3,10 @@
 This format is based on [Keep a Changelog](https://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.2.2] - 2026-05-09
+## Fixed
+* docs.rs build
+
 ## [0.2.1] - 2026-05-09
 ## Fixed
 * Correct mode state during tx
