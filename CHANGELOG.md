@@ -3,8 +3,9 @@
 This format is based on [Keep a Changelog](https://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [0.2.0] - 2025-10-10
+## [0.2.1] - 2026-05-09
 ## Fixed
+* Correct mode state during tx
 * rustfmt formatting
 
 ## [0.2.0] - 2025-10-10
