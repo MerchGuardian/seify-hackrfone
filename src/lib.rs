@@ -48,7 +48,7 @@
 mod types;
 
 use futures_lite::future::block_on;
-use log::{info, warn};
+use log::warn;
 use nusb::{
     DeviceInfo,
     transfer::{ControlIn, ControlOut, ControlType, Queue, Recipient, RequestBuffer},
