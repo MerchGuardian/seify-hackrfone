@@ -117,7 +117,7 @@ pub enum Error {
     #[error("transfer")]
     Transfer(#[from] nusb::transfer::TransferError),
     /// Transfer truncated.
-    #[error("transfer truncated")]
+    #[error("transfer truncated: got {actual} bytes, expected {expected}")]
     TransferTruncated {
         /// Actual amount of bytes transferred.
         actual: usize,
@@ -127,7 +127,7 @@ pub enum Error {
     /// An API call is not supported by your hardware.
     ///
     /// Try updating the firmware on your device.
-    #[error("no api")]
+    #[error("no api: device version {device}, minimum required {min}")]
     NoApi {
         /// Current device version.
         device: UsbVersion,
